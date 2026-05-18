@@ -13,18 +13,8 @@ require('dotenv').config();
 const app  = express();
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
-const DEFAULT_ADMIN_NAME = process.env.DEFAULT_ADMIN_NAME || 'Admin';
-const DEFAULT_ADMIN_PASSWORD = process.env.DEFAULT_ADMIN_PASSWORD || '123456';
-const DEFAULT_ADMIN_EMAIL = process.env.DEFAULT_ADMIN_EMAIL || DEFAULT_ADMIN_NAME;
 
 app.use(express.json());
-app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    if (req.method === 'OPTIONS') return res.sendStatus(204);
-    next();
-});
 
 // ----------------------------------------------------------------
 // MIDDLEWARE — ກວດ Token (auth)
@@ -38,50 +28,6 @@ function auth(req, res, next) {
     } catch {
         res.status(401).json({ success: false, message: 'Token ບໍ່ຖືກຕ້ອງ' });
     }
-}
-
-async function ensureDefaultAdmin() {
-    const adminPermissions = JSON.stringify(['*']);
-    const [roles] = await db.query('SELECT id FROM roles WHERE name = ? LIMIT 1', ['admin']);
-    let roleId = roles[0]?.id;
-
-    if (!roleId) {
-        const [roleResult] = await db.query(
-            'INSERT INTO roles (name, permissions) VALUES (?, ?)',
-            ['admin', adminPermissions]
-        );
-        roleId = roleResult.insertId;
-    }
-
-    const passwordHash = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
-    const [users] = await db.query(
-        'SELECT id FROM users WHERE email = ? OR name = ? LIMIT 1',
-        [DEFAULT_ADMIN_EMAIL, DEFAULT_ADMIN_NAME]
-    );
-
-    if (users.length) {
-        await db.query(
-            'UPDATE users SET role_id = ?, name = ?, email = ?, password_hash = ?, is_active = 1 WHERE id = ?',
-            [roleId, DEFAULT_ADMIN_NAME, DEFAULT_ADMIN_EMAIL, passwordHash, users[0].id]
-        );
-        return;
-    }
-
-    await db.query(
-        'INSERT INTO users (role_id, name, email, password_hash, phone, is_active) VALUES (?, ?, ?, ?, ?, 1)',
-        [roleId, DEFAULT_ADMIN_NAME, DEFAULT_ADMIN_EMAIL, passwordHash, null]
-    );
-}
-
-async function getOrCreateRoleId(name, permissions = []) {
-    const [roles] = await db.query('SELECT id FROM roles WHERE name = ? LIMIT 1', [name]);
-    if (roles.length) return roles[0].id;
-
-    const [result] = await db.query(
-        'INSERT INTO roles (name, permissions) VALUES (?, ?)',
-        [name, JSON.stringify(permissions)]
-    );
-    return result.insertId;
 }
 
 // ----------------------------------------------------------------
@@ -150,11 +96,10 @@ app.post('/api/register', async (req, res) => {
         const [exist] = await db.query('SELECT id FROM users WHERE email = ?', [email]);
         if (exist.length) return res.status(409).json({ success: false, message: 'Email ນີ້ຖືກໃຊ້ແລ້ວ' });
 
-        const finalRoleId = role_id || await getOrCreateRoleId('customer');
         const hashed = await bcrypt.hash(password, 10);
         const [result] = await db.query(
             'INSERT INTO users (role_id, name, email, password_hash, phone) VALUES (?, ?, ?, ?, ?)',
-            [finalRoleId, name, email, hashed, phone || null]
+            [role_id || 3, name, email, hashed, phone || null]
         );
         res.status(201).json({ success: true, message: 'ລົງທະບຽນສຳເລັດ!', userId: result.insertId });
     } catch (err) {
@@ -170,12 +115,8 @@ app.post('/api/login', async (req, res) => {
             return res.status(400).json({ success: false, message: 'ກະລຸນາໃສ່ Email ແລະ Password' });
         }
         const [rows] = await db.query(
-            `SELECT u.*, r.name AS role_name
-             FROM users u JOIN roles r ON u.role_id = r.id
-             WHERE (u.email = ? OR u.name = ?) AND u.is_active = 1
-             ORDER BY (u.email = ?) DESC, u.id ASC
-             LIMIT 1`,
-            [email, email, email]
+            'SELECT u.*, r.name AS role_name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.email = ? AND u.is_active = 1',
+            [email]
         );
         if (!rows.length) return res.status(401).json({ success: false, message: 'Email ຫຼື Password ບໍ່ຖືກຕ້ອງ' });
 
@@ -726,14 +667,6 @@ app.post('/api/reports', auth, async (req, res) => {
 // ================================================================
 // START SERVER
 // ================================================================
-ensureDefaultAdmin()
-    .then(() => {
-        console.log(`Default admin ready -> ${DEFAULT_ADMIN_NAME} / ${DEFAULT_ADMIN_PASSWORD}`);
-    })
-    .catch((err) => {
-        console.error('Failed to prepare default admin:', err);
-    });
-
 app.listen(PORT, () => {
     console.log(`✅ Server running → http://localhost:${PORT}`);
 });
