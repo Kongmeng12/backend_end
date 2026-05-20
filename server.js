@@ -5,6 +5,7 @@
 // npm install express mysql2 dotenv bcrypt jsonwebtoken
 
 const express  = require('express');
+const cors     = require('cors');
 const db       = require('./db');
 const bcrypt   = require('bcrypt');
 const jwt      = require('jsonwebtoken');
@@ -14,6 +15,7 @@ const app  = express();
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
 
+app.use(cors());
 app.use(express.json());
 
 // ----------------------------------------------------------------
@@ -667,6 +669,18 @@ app.post('/api/reports', auth, async (req, res) => {
 // ================================================================
 // START SERVER
 // ================================================================
-app.listen(PORT, () => {
-    console.log(`✅ Server running → http://localhost:${PORT}`);
-});
+async function startServer() {
+    try {
+        const conn = await db.getConnection();
+        console.log('✅ ເຊື່ອມຕໍ່ Database ສຳເລັດ');
+        conn.release();
+        app.listen(PORT, () => {
+            console.log(`✅ Server running → http://localhost:${PORT}`);
+        });
+    } catch (err) {
+        console.error('❌ ເຊື່ອມຕໍ່ Database ລົ້ມເຫຼວ:', err.message);
+        process.exit(1);
+    }
+}
+
+startServer();
